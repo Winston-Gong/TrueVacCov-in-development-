@@ -1,0 +1,20 @@
+{
+    "collab_server" : "",
+    "contents" : "# Some useful keyboard shortcuts for package authoring:\n#\n#   Build and Reload Package:  'Ctrl + Shift + B'\n#   Check Package:             'Ctrl + Shift + E'\n#   Test Package:              'Ctrl + Shift + T'\n#'\n\nlibrary(knitr)\nlibrary(xtable)\nlibrary(rstan)\nlibrary(readstata13)\nlibrary(boot)\nlibrary(Hmisc)\nlibrary(shinystan)\n\nsetwd(\"C:/Dropbox (Personal)/Pakistan/Triangulation_model/code/20170617\")\n\nhello <- function() {\n  print(\"Hello, world!\")\n}\n",
+    "created" : 1500328148094.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "3522254062",
+    "id" : "2A04AD89",
+    "lastKnownWriteTime" : 1500329911,
+    "last_content_update" : 1500329911218,
+    "path" : "C:/Dropbox (Personal)/Pakistan/Triangulation_model/Rpackage/TrueVacCov/R/TrueVacCov.R",
+    "project_path" : "R/TrueVacCov.R",
+    "properties" : {
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

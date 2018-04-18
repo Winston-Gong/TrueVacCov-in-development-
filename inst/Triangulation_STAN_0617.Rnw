@@ -1,0 +1,586 @@
+\documentclass{article}
+\usepackage[sc]{mathpazo}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=2.5cm,bmargin=2.5cm,lmargin=2.5cm,rmargin=2.5cm}
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+\usepackage{url}
+\usepackage[unicode=true,pdfusetitle,
+  bookmarks=true,bookmarksnumbered=true,bookmarksopen=true,bookmarksopenlevel=2,
+  breaklinks=false,pdfborder={0 0 1},backref=false,colorlinks=false]
+  {hyperref}
+\hypersetup{
+  pdfstartview={XYZ null null 1}}
+\usepackage{breakurl}
+\usepackage{amsfonts,amsmath,amssymb,graphicx}
+\usepackage{mathabx}
+\usepackage{placeins}
+\usepackage{rotating}
+\usepackage{tikz}
+\usepackage{textcomp}
+
+\usepackage{xcolor,cancel}
+\newcommand\hcancel[2][black]{\setbox0=\hbox{$#2$}%
+\rlap{\raisebox{.45\ht0}{\textcolor{#1}{\rule{\wd0}{1pt}}}}#2} \newcommand{\indep}{\rotatebox[origin=c]{90}{$\models$}}
+
+\usepackage{fancyvrb}
+\usepackage{calc}  
+\usepackage{enumitem}
+
+\makeatletter
+
+\begin{document}
+
+<<setup, include=FALSE, cache=FALSE>>=
+library(knitr)
+library(xtable)
+library(rstan)
+library(readstata13)
+library(boot)
+library(Hmisc)
+library(shinystan)
+
+# set global chunk options
+  options(replace.assign = TRUE, width = 90)
+  opts_chunk$set(fig.path = 'figure/minimal-',
+                 fig.align = 'center',
+                 fig.show = 'hold')
+  setwd("C:/Dropbox (Personal)/Pakistan/Triangulation_model/code/20170617")
+  rm(list = ls()[!(ls() %in% c('Varfit1', 'tau', 'Vacsurvey'))])
+#clear attached data
+repeat {
+  x <- lapply(
+       X = intersect(search(), objects()),
+       FUN = function(X) {
+         detach(name = X, character.only = TRUE)
+       }
+  )
+
+  y <- lapply(x, function(X) {
+    cat(attr(X, "name"), "\n")
+  })
+
+  if (identical(x, list())) {
+    break
+  }
+}
+@
+
+\title{Pakistan Vaccine Coverage; Measles Biomarker Analysis}
+  \author{Wenfeng Gong}
+  \date{6/17/17}
+  \maketitle
+
+NOTE: 4th attempt; Equivocal ELISA results are separatly modeled; \\
+
+\subsection*{Part 1: Annotation}
+\begin{description}[leftmargin=!,labelwidth=\widthof{$\Pr(\cdots)$},font=\normalfont]
+  \item[$Ab^{+}$] : Positive measles IgG classification
+  \item[$Ab^{-}$] : Negative measles IgG classification
+  \item[$Ab^{e}$] : Equivocal measles IgG classification
+  \item[$Vac^{+}$] : Positive measles vaccination history (latant variable)
+  \item[$Vac^{-}$] : Negative measles vaccination history (latant variable)
+  \item[$\boxasterisk$] : Vaccination card seen
+  \item[$\boxdot$] : Vaccination card NOT seen
+  \item[$\boxplus$] : Measles vaccination indicated on card
+  \item[$\boxminus$] : No measles vaccination indicated on card
+  \item[$\oplus$] : Measles vaccination recalled by caregiver
+  \item[$\ominus$] : No measles vaccination recalled by caregiver
+  \item[$\Pr(\cdots)$] : Probability of $\cdots$
+  \item[N($\cdots$)] : Count of $\cdots$
+\end{description}
+
+\subsection*{Part 2: Assumptions}
+  $\Pr(Vac^{+}|\boxasterisk,\boxplus,\oplus)>0.9 $ in probablistic model \\
+  $\Pr(Vac^{+}|\boxasterisk,\boxplus)>0.9 $ in probablistic model \\
+  $\Pr(Vac^{+}|\boxasterisk,\boxminus,\ominus)<0.1 $ in probablistic model \\
+  $\Pr(Ab^{+}|Vac^{+}) \indep \Pr(\oplus) $  \\
+  $\Pr(Ab^{+}|Vac^{+}) \indep \Pr(\boxplus) $  \\
+  $\Pr(Ab^{+}|Vac^{+}) \indep \Pr(\boxdot) $ \\
+  $\Pr(Ab^{-}|Vac^{-}) \indep \Pr(\oplus) $ \\
+  $\Pr(Ab^{-}|Vac^{-}) \indep \Pr(\boxplus) $ \\
+  $\Pr(Ab^{-}|Vac^{-}) \indep \Pr(\boxdot) $ \\
+  Unknown recalls are considered negative recalls \\
+
+\subsection*{Part 3: Parameters}
+  $\theta_{-,+}:\Pr(Ab^{+}|Vac^{-}) $ \\
+  $\theta_{+,+}:\Pr(Ab^{+}|Vac^{+}) $ \\
+  $\theta_{-,-|+}:\Pr(Ab^{-}|Vac^{-},\overline{Ab^{+}}) $ \\
+  $\theta_{+,-|+}:\Pr(Ab^{-}|Vac^{+},\overline{Ab^{+}}) $ \\
+  $\tau_{1}:\Pr(Vac^{+}|\boxasterisk,\boxminus,\ominus) $ \\
+  $\tau_{2}:\Pr(Vac^{+}|\boxasterisk,\boxminus,\oplus) $ \\
+  $\tau_{3}:\Pr(Vac^{+}|\boxdot,\oplus) $ \\
+  $\tau_{4}:\Pr(Vac^{+}|\boxdot,\ominus) $ \\
+  $\tau_{5}:\Pr(Vac^{+}|\boxasterisk,\boxplus) $ \\
+
+\subsection*{Part 4: Model construction}
+There are two ways to model the three-level ELISA test outcome: first, consider it as a multinomial logistic problem with a log-linear model; second, as described below, derectly estimate probabily of Ab positive and probability of Ab negative when Ab is not positive. The first method is not used because evaluation takes too long and results are similar. \\
+  \noindent 
+  \textbf{Probabilistic model:} \\
+  \begin{eqnarray*}
+    \Pr(Ab(n)=i) &=& \Pr(Vac^{+}(n))\Pr(Ab=i|Vac^{+})+\Pr(Vac^{-}(n))\Pr(Ab=i|Vac^{-}) \\
+    n &\in & \{1, 2, ..., N\} \\
+    N &=& N(Ab^+) + N(Ab^-) + N(Ab^e) \\
+    i &\in & \{-, +, e\} \\
+    && \\
+    Ab(n)|Vac &\sim & Categorical(\theta|Vac) \\
+    \Pr(Ab^{+}|Vac^{-}) &=& \theta_{-,+} \\
+    \Pr(Ab^{-}|Vac^{-}) &=& \theta_{-,-}=\theta_{-,-|+}\cdot\theta_{-,+} \\
+    \Pr(Ab^{e}|Vac^{-}) &=& \theta_{-,e}=1-\theta_{-,-}-\theta_{-,+} \\
+    \Pr(Ab^{+}|Vac^{+}) &=& \theta_{+,+} \\
+    \Pr(Ab^{-}|Vac^{+}) &=& \theta_{+,-}=\theta_{+,-|+}\cdot\theta_{+,+} \\
+    \Pr(Ab^{e}|Vac^{+}) &=& \theta_{+,e}=1-\theta_{+,-}-\theta_{+,+} \\
+    && \\
+    Vac(n) &\sim & Bernoulli(\tau(n)) \\
+  \tau (n)&=& \tau_{1}\cdot F_{1}(n)
+            +\tau_{2} \cdot F_{2}(n)
+            +\tau_{3} \cdot F_{3}(n)
+            +\tau_{4} \cdot F_{4}(n)
+            +\tau_{5} \cdot F_{5}(n) \\
+  \end{eqnarray*} 
+where
+\[
+\begin{array}{ccc}
+  F_{1}=\left\{ 
+    \begin{array}{ll}
+      1 & \text{, if }\boxasterisk,\boxminus,\ominus \\ 
+      0 & \text{, if else}%
+    \end{array}%
+    \right.  
+  & F_{2}=\left\{ 
+    \begin{array}{ll}
+      1 & \text{, if }\boxasterisk,\boxminus,\oplus \\ 
+      0 & \text{, if else}%
+    \end{array}%
+    \right.  
+  & F_{3}=\left\{ 
+    \begin{array}{ll}
+      1 & \text{, if }\boxdot,\oplus \\ 
+      0 & \text{, if else}%
+    \end{array}%
+    \right.  
+  \\ F_{4}=\left\{ 
+    \begin{array}{ll}
+      1 & \text{, if }\boxdot,\ominus \\ 
+      0 & \text{, if else}%
+    \end{array}%
+    \right. 
+  & F_{5}=\left\{ 
+    \begin{array}{ll}
+      1 & \text{, if }\boxasterisk,\boxplus \\ 
+      0 & \text{, if else}%
+    \end{array}%
+    \right. 
+    \end{array}%
+\]  
+
+\subsection*{Part 5: Data}
+
+<<Data_input, include=FALSE,results='makeup'>>=
+data<-read.dta13("../../data/Biomarker_modeling_data_deidentified.dta")
+attach(data)
+  childid<-f3_a0_2surveychildid
+  N_survey<-length(f3_a0_2surveychildid)
+Ab<-as.numeric(BioELISA_M_yn)
+  Ab<-Ab
+  N_ab<-length(which(!is.na(Ab)))
+  N_ab_pos<-length(which(Ab==2))
+  N_ab_neg<-length(which(Ab==1))
+  N_ab_eqi<-length(which(Ab==3))
+@
+\textit{N\_survey} = \Sexpr{round(N_survey,0)}:  Total number of survey participants \\
+\textit{N\_ab} = \Sexpr{round(N_ab,0)}:  Total number of biomarker classification \\
+$ N(Ab^{+}) = \Sexpr{round(N_ab_pos,0)} $:  Number of positive biomarker classification \\
+$ N(Ab^{-}) = \Sexpr{round(N_ab_neg,0)} $:  Number of negative biomarker classification \\
+$ N(Ab^{e}) = \Sexpr{round(N_ab_eqi,0)} $:  Number of equivocal biomarker classification \\
+
+\noindent 
+In this model, keep equivocal ab results as equivocal \\
+<<Data_edit, include=TRUE, echo=FALSE, results='asis', message=TRUE>>=
+kable(summary(BioELISA_M_yn))
+@
+\FloatBarrier
+ 
+<<Data_input2, include=FALSE,results='asis'>>=
+NY_o<-as.numeric(card_yn_measles1)
+  NY_o<-NY_o-1
+  NY_odot<-as.numeric(is.na(NY_o))
+  NY_oplus<-NY_o
+  NY_oplus[is.na(NY_oplus)]<-0
+NY_box<-as.numeric(recall_yn_measles1)
+NY_cor<-as.numeric(cor_yn_measles1)
+  NY_box<-NY_box-1
+  NY_box[is.na(NY_box)]<-0
+datashort<-cbind(childid,method,cluster,Ab,NY_odot,NY_oplus,NY_box)
+  datashort<-as.data.frame(datashort,stringsAsFactors=FALSE)
+  datashort$Ab<-as.numeric(datashort$Ab)
+  datashort$NY_odot<-as.numeric(datashort$NY_odot)
+  datashort$NY_box<-as.numeric(datashort$NY_box)
+  datashort$NY_oplus<-as.numeric(datashort$NY_oplus)
+detach(data)
+attach(datashort)
+  N_odot<-length(which(NY_odot==1))
+  N_oplus<-length(which(NY_odot==0 & NY_oplus==1))
+  N_ominus<-length(which(NY_odot==0 & NY_oplus==0))
+  N_boxplus<-length(which(NY_box==1))
+  N_boxminus<-length(which(NY_box==0))
+  N_ominus_boxminus<-length(which(NY_odot==0 & NY_oplus==0 & NY_box==0))
+  N_odot_boxplus<-length(which(NY_odot==1 & NY_box==1))
+  N_ominus_boxplus<-length(which(NY_odot==0 & NY_oplus==0 & NY_box==1))
+  N_odot_boxminus<-length(which(NY_odot==1 & NY_box==0))
+  N_oplus_boxplus<-length(which(NY_oplus==1 & NY_box==1))
+  N_odotnot_oplusORboxplus<-length(which(NY_odot==0 & (NY_oplus==1 | NY_box==1)))
+@
+\noindent
+$ N(\boxdot) = \Sexpr{round(N_odot,0)} $:  Number of unknown card reading \\
+$ N(\boxasterisk,\boxplus) = \Sexpr{round(N_oplus,0)} $:  Number of positive card reading \\
+$ N(\boxasterisk,\boxminus) = \Sexpr{round(N_ominus,0)} $:  Number of negative card reading \\
+$ N(\oplus) = \Sexpr{round(N_boxplus,0)} $:  Number of positive recall \\
+$ N(\ominus) = \Sexpr{round(N_boxminus,0)} $:  Number of negative recall \\
+$ N(\boxasterisk,\boxminus,\ominus) = \Sexpr{round(N_ominus_boxminus,0)} $:  
+    Number of negative card and negative recall \\
+$ N(\boxdot,\oplus) = \Sexpr{round(N_odot_boxplus,0)} $:  Number of unknown card and positive recall \\
+$ N(\boxasterisk,\boxminus,\oplus) = \Sexpr{round(N_ominus_boxplus,0)} $:  
+    Number of negative card and positive recall \\
+$ N(\boxdot,\ominus) = \Sexpr{round(N_odot_boxminus,0)} $:  Number of unknown card and negative recall \\
+\\
+Crude coverage in all survey participants: \\
+Positive card among card seen: \Sexpr{round(N_oplus/(N_survey-N_odot),4)} \\
+Positive card or recall among all: \Sexpr{round((N_oplus+N_boxplus-N_oplus_boxplus)/N_survey,4)} \\
+Positive card or recall among card seen: \Sexpr{round(N_odotnot_oplusORboxplus/(N_survey-N_odot),4)} \\
+
+\subsection*{Part 7: STAN Program}
+Method 1: multinormial logistic model
+  \VerbatimInput{Triangulation_STAN_nonlogit.stan}
+Method 2: direct estimate
+  \VerbatimInput{Triangulation_STAN_logit.stan}
+
+\subsection*{Part 8: \textbf{\textsf{R}} coding}
+
+<<Data_Modeling, include=TRUE,results='markup',message=FALSE>>=
+# Prepare the factor varibles
+  datashort$F1<-0
+    datashort$F1[!NY_odot&!NY_oplus&!NY_box]<-1
+  datashort$F2<-0
+    datashort$F2[!NY_odot&!NY_oplus&NY_box]<-1
+  datashort$F3<-0
+    datashort$F3[NY_odot&NY_box]<-1
+  datashort$F4<-0
+    datashort$F4[NY_odot&!NY_box]<-1
+  datashort$F5<-0
+    datashort$F5[!NY_odot&NY_oplus]<-1
+detach(datashort)
+  saveRDS(datashort,"datashort.RDS")
+  
+datashort<-readRDS("datashort.RDS")
+
+datause<-datashort[!is.na(datashort$Ab),]
+rm(NY_box,NY_o,NY_odot,NY_oplus,childid,Ab)
+
+# Model 1
+attach(datause)
+  N<-length(childid)
+  system.time(Varfit1<-stan("Triangulation_STAN_nonlogit.stan"))
+detach(datause)
+# save shinystan object
+Varfit1_sso <- as.shinystan(Varfit1, pars=c("thetavar0","thetavar1","tau1","tau2",
+                                            "tau3","tau4","tau5","Vacbioall"))
+  saveRDS(Varfit1_sso, "shinystan1.rds")
+
+# Model 2
+attach(datause)
+  N<-length(childid)
+  system.time(Varfit2<-stan("Triangulation_STAN_logit.stan"))
+detach(datause)
+# save shinystan object
+Varfit2_sso <- as.shinystan(Varfit2, pars=c("thetavar0","thetavar1","tau1","tau2",
+                                            "tau3","tau4","tau5","Vacbioall"))
+  saveRDS(Varfit2_sso, "shinystan2.rds")
+ 
+ @
+
+<<Posteria_estimate, include=TRUE,results='asis',message=FALSE>>=
+#print posteria summary
+  # Model 1
+posteria_summary<-summary(Varfit1, pars=c("thetavar0","thetavar1","tau1","tau2",
+                          "tau3","tau4","tau5","Vacbioall"), digits_summary=3)
+  rownames(posteria_summary$summary)
+  xtable(posteria_summary$summary,  digits = 4)
+ # Model 2
+posteria_summary<-summary(Varfit2, pars=c("thetavar0","thetavar1","tau1","tau2",
+                          "tau3","tau4","tau5","Vacbioall"), digits_summary=3)
+  rownames(posteria_summary$summary)
+  xtable(posteria_summary$summary,  digits = 4)
+
+# return a list of arrays of results
+la <- extract(Varfit2, permuted = TRUE)
+  Vacbioall <- la$Vacbioall
+  #describe(Vacbioall)
+  #quantile(Vacbioall, c(.025, .975))
+
+# estimate all survey participant coverage
+tau <- matrix(NA, nrow=N_survey, ncol=length(la$tau1))
+N_survey<-length(datashort$childid)
+attach(datashort)
+  for (n in 1:N_survey) {
+    for (m in 1:length(la$tau1)) {
+      tau[n,m]<-la$tau1[m]*F1[n]+la$tau2[m]*F2[n]+la$tau3[m]*F3[n]+
+                la$tau4[m]*F4[n]+la$tau5[m]*F5[n]
+    }
+  }
+detach(datashort)
+Vacsurvey <- matrix(NA, nrow=N_survey, ncol=length(la$tau1))
+for (n in 1:N_survey) {
+  for (m in 1:length(la$tau1)) {
+    Vacsurvey[n,m]<-rbinom(1, 1, tau[n,m])
+  }
+}
+Vacsurveycov<-apply(Vacsurvey,2,sum)/N_survey
+
+#print posteria summary of Vacsurveycov
+summaryfunction= function (x){
+  if( is.numeric(x)!=TRUE) {stop("Supplied X is not numeric")}
+  mysummary = data.frame(
+            "sd." =as.numeric(sd(x)),
+            "Min." =as.numeric( min(x)),
+            "2.5%" = quantile(x, c(.025))[1],
+            "1st Qu." = quantile(x)[2],
+            "Median" = median(x),
+            "Mean" = mean(x),
+            "3rd Qu." = quantile(x)[4],
+            "97.5%" = quantile(x, c(.975))[1],
+            "Max." = max(x),
+            row.names=""
+            )
+     names(mysummary) = c("sd", "Min.","2.5%", "1st Qu.","Median","Mean","3rd Qu.","97.5%","Max.")
+     return( mysummary )
+  }
+print(xtable(summaryfunction(Vacsurveycov),  digits = 4))
+save.image("output.RData")
+@
+
+\subsection*{Part 9: Next Steps}
+\begin{enumerate}
+  \item Model age dependency of parameters
+  \item Carry design effect from surveys to the adjusted coverage estimates
+  \item Simulate with various biomarker enrollment ratio to find optimal value
+  \item Evaluate quantitative ELISA OD values instead of qualitative classifications
+  \item Assess model sensitivity to blood collection refusals, insufficient collection, and haemolyzed samples
+  \item Compare prediction with ZM data
+  \item Ease assumption $\Pr(Vac^{+}|\boxasterisk,\boxplus)>0.9 $ with assumption $\Pr(Vac^{+}|\boxasterisk,\boxplus,\oplus)>0.9 $
+  \item Try to conclude parameters which are generalizable to different settings
+  \item Create R package for use by other researchers
+  \item Handle multiple doses
+\end{enumerate}
+
+\end{document}
+
+######## Below are DRAFT coding that are not used  #######
+
+
+#<<Output-CIplot, fig.width=8, fig.height=4, out.width='.4\\linewidth'>>=
+plot(Varfit1, show_density = TRUE, ci_level = 0.95, pars=c("thetavar0","thetavar1","tau1","tau2","tau3","tau4","tau5","Vacbioall"))
+Varfit1_sso <- launch_shinystan(Varfit1)
+pairs(Varfit1, pars = c("thetavar0", "tau1", "lp__"))
+pairs(Varfit1, pars = c("thetavar0", "thetavar1", "Vacbioall"))
+pairs(Varfit1, pars = c("thetavar0", "tau2", "tau3", "tau4"))
+# plot(Varfit1, plotfun = "hist", pars = "thetavar0", include = FALSE)
+plot(Varfit1, plotfun = "trace", pars = c("thetavar0", "thetavar1"), inc_warmup = TRUE)
+plot(Varfit1, plotfun = "rhat") + ggtitle("rhat plot")
+# @
+
+# 
+# ### return an array of three dimensions: iterations, chains, parameters 
+# a <- extract(fit, permuted = FALSE) 
+# 
+# ### use S3 functions as.array (or as.matrix) on stanfit objects
+# a2 <- as.array(fit)
+# m <- as.matrix(fit)
+
+# ###  the parallel code does not work on Windows
+# system.time(Varfit2 <-
+#   sflist2stanfit(
+#     mclapply(1:4, mc.cores = 4,    # adjust number of cores to suit 
+#       function(i) stan("Triangulation_STAN.stan",
+#                        iter=2000,
+#                        chains = 1, 
+#                        chain_id = i, 
+#                        refresh = -1))
+#     )
+#   )
+
+######## coding to deploy STAN output on my website  #######
+Varfit2_sso<-readRDS("C:/Dropbox (Personal)/Pakistan/Triangulation_model/code/20170617/shinystan2.rds")
+deploy_shinystan(Varfit2_sso,"KorangiVxCov_trueMCV1",account='wenfenggong')
+
+##### Below are plot related coding that are not in knitr format yet ############################
+library(ggplot2)
+# launch_shinystan(Varfit1_sso)
+# launch_shinystan(Varfit2_sso)
+launch_shinystan(readRDS("shinystan2.rds"))
+# saveRDS(Varfit1,"Varfit1.rds")
+load("shinystan-multiparam-gg.RData")
+class(shinystan_multiparam_gg)
+shinystan_multiparam_gg
+shinystan_multiparam_gg+theme(axis.text.x=element_text(face="bold", size=24))
+
+##### Below are table related coding that are not in knitr format yet ############################
+
+##### Table 4 ############################
+# True cov est among no HBR
+sum((datause$F3+datause$F4)==1)
+Cov_noHBR<-rowMeans(la$Vac[,(datause$F3+datause$F4)==1])
+print(summaryfunction(Cov_noHBR),  digits = 4)
+
+# True cov est among yes HBR
+sum((datause$NY_odot)==0)
+Cov_yesHBR<-rowMeans(la$Vac[,(datause$NY_odot)==0])
+print(summaryfunction(Cov_yesHBR),  digits = 4)
+
+# True cov est among neg HBR
+sum((datause$F1+datause$F2)==1)
+Cov_negHBR<-rowMeans(la$Vac[,(datause$F1+datause$F2)==1])
+print(summaryfunction(Cov_negHBR),  digits = 4)
+
+# True cov est among pos HBR
+sum((datause$F5)==1)
+Cov_posHBR<-rowMeans(la$Vac[,(datause$F5)==1])
+print(summaryfunction(Cov_posHBR),  digits = 4)
+
+# recall cov est among no HBR
+sum((datause$F3+datause$F4)==1)
+Covrecall_noHBR<-sum(datause$F3==1)/sum((datause$F3+datause$F4)==1)
+BiasRecall_noHBR<-Covrecall_noHBR-Cov_noHBR
+print(summaryfunction(BiasRecall_noHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$F3)==1])
+P=rowSums(la$Vac[,(datause$F3+datause$F4)==1])
+SensRecall_noHBR=TP/P
+print(summaryfunction(SensRecall_noHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$F4)==1]==0)
+N=rowSums(la$Vac[,(datause$F3+datause$F4)==1]==0)
+SpecRecall_noHBR=TN/N
+print(summaryfunction(SpecRecall_noHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$F3)==1])
+testP=sum(datause$F3==1)
+PPVRecall_noHBR=TP/testP
+print(summaryfunction(PPVRecall_noHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$F4)==1]==0)
+testN=sum(datause$F4==1)
+NPVRecall_noHBR=TN/testN
+print(summaryfunction(NPVRecall_noHBR),  digits = 4)
+
+# recall cov est among yes HBR
+sum((datause$NY_odot)==0)
+Covrecall_yesHBR<-sum((datause$NY_odot==0 & datause$NY_box==1))/sum((datause$NY_odot)==0)
+BiasRecall_yesHBR<-Covrecall_yesHBR-Cov_yesHBR
+print(summaryfunction(BiasRecall_yesHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$NY_odot==0 & datause$NY_box==1)])
+P=rowSums(la$Vac[,datause$NY_odot==0])
+SensRecall_yesHBR=TP/P
+print(summaryfunction(SensRecall_yesHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$NY_odot==0 & datause$NY_box==0)]==0)
+N=rowSums(la$Vac[,datause$NY_odot==0]==0)
+SpecRecall_yesHBR=TN/N
+print(summaryfunction(SpecRecall_yesHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$NY_odot==0 & datause$NY_box==1)])
+testP=sum((datause$NY_odot==0 & datause$NY_box==1))
+PPVRecall_yesHBR=TP/testP
+print(summaryfunction(PPVRecall_yesHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$NY_odot==0 & datause$NY_box==0)]==0)
+testN=sum((datause$NY_odot==0 & datause$NY_box==0))
+NPVRecall_yesHBR=TN/testN
+print(summaryfunction(NPVRecall_yesHBR),  digits = 4)
+
+# recall cov est among neg HBR
+sum((datause$F1+datause$F2)==1)
+Covrecall_negHBR<-sum(datause$F2==1)/sum((datause$F1+datause$F2)==1)
+BiasRecall_negHBR<-Covrecall_negHBR-Cov_negHBR
+print(summaryfunction(BiasRecall_negHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$F2)==1])
+P=rowSums(la$Vac[,(datause$F1+datause$F2)==1])
+SensRecall_negHBR=TP/P
+SensRecall_negHBR<-SensRecall_negHBR[!is.nan(SensRecall_negHBR)]
+print(summaryfunction(SensRecall_negHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$F1)==1]==0)
+N=rowSums(la$Vac[,(datause$F1+datause$F2)==1]==0)
+SpecRecall_negHBR=TN/N
+print(summaryfunction(SpecRecall_negHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$F2)==1])
+testP=sum(datause$F2==1)
+PPVRecall_negHBR=TP/testP
+print(summaryfunction(PPVRecall_negHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$F1)==1]==0)
+testN=sum(datause$F1==1)
+NPVRecall_negHBR=TN/testN
+print(summaryfunction(NPVRecall_negHBR),  digits = 4)
+
+# recall cov est among pos HBR
+sum((datause$F5)==1)
+Covrecall_posHBR<-sum((datause$F5==1 & datause$NY_box==1))/sum((datause$F5)==1)
+BiasRecall_posHBR<-Covrecall_posHBR-Cov_posHBR
+print(summaryfunction(BiasRecall_posHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$F5==1 & datause$NY_box==1)])
+P=rowSums(la$Vac[,(datause$F5)==1])
+SensRecall_posHBR=TP/P
+SensRecall_posHBR<-SensRecall_posHBR[!is.nan(SensRecall_posHBR)]
+print(summaryfunction(SensRecall_posHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$F5==1 & datause$NY_box==0)]==0)
+N=rowSums(la$Vac[,datause$F5==1]==0)
+SpecRecall_posHBR=TN/N
+SpecRecall_posHBR<-SpecRecall_posHBR[!is.nan(SpecRecall_posHBR)]
+print(summaryfunction(SpecRecall_posHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$F5==1 & datause$NY_box==1)])
+testP=sum((datause$F5==1 & datause$NY_box==1))
+PPVRecall_posHBR=TP/testP
+print(summaryfunction(PPVRecall_posHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$F5==1 & datause$NY_box==0)]==0)
+testN=sum((datause$F5==1 & datause$NY_box==0))
+NPVRecall_posHBR=TN/testN
+print(summaryfunction(NPVRecall_posHBR),  digits = 4)
+
+# HBR cov est among yes HBR
+sum((datause$NY_odot)==0)
+CovHBR_yesHBR<-sum((datause$NY_odot==0 & datause$NY_oplus==1))/sum((datause$NY_odot)==0)
+BiasHBR_yesHBR<-CovHBR_yesHBR-Cov_yesHBR
+print(summaryfunction(BiasHBR_yesHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$NY_odot==0 & datause$NY_oplus==1)])
+P=rowSums(la$Vac[,datause$NY_odot==0])
+SensHBR_yesHBR=TP/P
+print(summaryfunction(SensHBR_yesHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$NY_odot==0 & datause$NY_oplus==0)]==0)
+N=rowSums(la$Vac[,datause$NY_odot==0]==0)
+SpecHBR_yesHBR=TN/N
+print(summaryfunction(SpecHBR_yesHBR),  digits = 4)
+
+TP=rowSums(la$Vac[,(datause$NY_odot==0 & datause$NY_oplus==1)])
+testP=sum((datause$NY_odot==0 & datause$NY_oplus==1))
+PPVHBR_yesHBR=TP/testP
+print(summaryfunction(PPVHBR_yesHBR),  digits = 4)
+
+TN=rowSums(la$Vac[,(datause$NY_odot==0 & datause$NY_oplus==0)]==0)
+testN=sum((datause$NY_odot==0 & datause$NY_oplus==0))
+NPVHBR_yesHBR=TN/testN
+print(summaryfunction(NPVHBR_yesHBR),  digits = 4)
+
+####### MICS ##################
+sum(datause$F2)
+
